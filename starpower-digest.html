@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Starpower · Influencer Marketing Digest</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #fff;
+    color: #111;
+    padding: 2rem 1.5rem 4rem;
+    min-height: 100vh;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #111; color: #f0f0f0; }
+    .card { background: #1a1a1a !important; border-color: #2a2a2a !important; }
+    .meta-bar { background: #1a1a1a !important; }
+    .source-chip { background: #1a1a1a !important; border-color: #2a2a2a !important; color: #888 !important; }
+    .section-divider { border-color: #2a2a2a !important; }
+    .story-divider { border-color: #2a2a2a !important; }
+    .footer-text { color: #555 !important; }
+    input { background: #1a1a1a !important; border-color: #2a2a2a !important; color: #f0f0f0 !important; }
+    .key-form { background: #1a1a1a !important; border-color: #2a2a2a !important; }
+    .muted { color: #888 !important; }
+    .secondary { color: #aaa !important; }
+  }
+  a { color: #2563eb; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const SOURCES = [
+  "Digiday","Adweek","Ad Age","The Drum","Marketing Week",
+  "Campaign","eMarketer","Sprout Social","Influencer Marketing Hub",
+  "TikTok Newsroom","Meta for Business","IAB","WARC"
+];
+
+const SECTION_ACCENTS = ["#E8FF00","#60a5fa","#34d399","#a78bfa"];
+
+const SYSTEM_PROMPT = `You are a senior influencer marketing intelligence analyst at Starpower, a leading influencer marketing agency with clients including Diageo and MAC Cosmetics.
+
+TASK: Search the web extensively for the most recent influencer marketing news (past 7 days) from authoritative trade sources only.
+
+Run web searches across ALL of the following query angles:
+1. "influencer marketing" news 2026 site:digiday.com OR site:adweek.com OR site:thedrum.com
+2. "creator economy" OR "creator partnership" 2026 site:adweek.com OR site:adage.com OR site:marketingweek.com
+3. influencer brand campaign deal 2026 site:thedrum.com OR site:adage.com OR site:campaignlive.com
+4. TikTok creator platform influencer 2026 site:digiday.com OR site:adweek.com
+5. influencer marketing data research report 2026 site:emarketer.com OR site:sproutsocial.com OR site:influencermarketinghub.com
+6. influencer agency acquisition partnership 2026 site:adage.com OR site:campaignlive.com OR site:marketingweek.com
+
+STRICT INCLUSION: Only stories directly about influencer marketing, creator economy, brand-creator partnerships, social platform creator features, influencer measurement/technology, or agency moves tied to influencer work.
+
+STRICT EXCLUSION: Generic social media news without influencer angle, low-quality blogs, PR fluff, stories older than 14 days, anything not from a major trade publication.
+
+For each story:
+- headline: Crisp journalistic headline
+- summary: 2-3 sentence factual summary
+- whyItMatters: 1-2 sentences on strategic implications for influencer marketers and agencies
+- source: Publication name
+- url: Direct article URL
+
+Group into 4 sections (omit if zero stories):
+1. Platform & Creator Economy
+2. Brand Campaign Highlights
+3. Data, Research & Measurement
+4. Agency & Industry Moves
+
+Return ONLY valid JSON — no markdown fences, no preamble:
+{
+  "weekOf": "April 15–22, 2026",
+  "totalStories": 10,
+  "editorNote": "One sharp sentence capturing the week's dominant theme.",
+  "sections": [
+    {
+      "title": "Platform & Creator Economy",
+      "stories": [
+        { "headline": "...", "summary": "...", "whyItMatters": "...", "source": "Digiday", "url": "https://..." }
+      ]
+    }
+  ]
+}`;
+
+const LOADING_MSGS = [
+  "Scanning Digiday, Adweek, The Drum...",
+  "Searching Ad Age, Marketing Week...",
+  "Pulling data from eMarketer, Sprout Social...",
+  "Filtering for influencer marketing relevance...",
+  "Compiling your weekly intelligence brief..."
+];
+
+function Spinner() {
+  return (
+    <svg width="36" height="36" viewBox="0 0 36 36" style={{ display: "block" }}>
+      <circle cx="18" cy="18" r="15" fill="none" stroke="#e5e5e5" strokeWidth="2" />
+      <circle cx="18" cy="18" r="15" fill="none" stroke="#E8FF00" strokeWidth="2"
+        strokeDasharray="20 75" strokeLinecap="round">
+        <animateTransform attributeName="transform" type="rotate"
+          from="0 18 18" to="360 18 18" dur="1s" repeatCount="indefinite" />
+      </circle>
+    </svg>
+  );
+}
+
+function App() {
+  const [apiKey, setApiKey] = useState(() => sessionStorage.getItem("sp_apikey") || "");
+  const [keyInput, setKeyInput] = useState("");
+  const [keySet, setKeySet] = useState(() => !!sessionStorage.getItem("sp_apikey"));
+  const [digest, setDigest] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [loadingMsg, setLoadingMsg] = useState("");
+
+  const saveKey = () => {
+    if (!keyInput.trim()) return;
+    sessionStorage.setItem("sp_apikey", keyInput.trim());
+    setApiKey(keyInput.trim());
+    setKeySet(true);
+    setKeyInput("");
+  };
+
+  const clearKey = () => {
+    sessionStorage.removeItem("sp_apikey");
+    setApiKey("");
+    setKeySet(false);
+    setDigest(null);
+  };
+
+  const generate = async () => {
+    setLoading(true);
+    setError(null);
+    setDigest(null);
+    let i = 0;
+    setLoadingMsg(LOADING_MSGS[0]);
+    const interval = setInterval(() => {
+      i = (i + 1) % LOADING_MSGS.length;
+      setLoadingMsg(LOADING_MSGS[i]);
+    }, 3500);
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 8000,
+          system: SYSTEM_PROMPT,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          messages: [{
+            role: "user",
+            content: `Generate this week's influencer marketing digest. Today is ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}. Run all 6 search queries. Return only the JSON digest.`
+          }]
+        })
+      });
+
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+
+      const text = data.content.filter(b => b.type === "text").map(b => b.text).join("");
+      if (!text) throw new Error("No content returned. Please try again.");
+
+      const cleaned = text.replace(/```json|```/g, "").trim();
+      const start = cleaned.indexOf("{");
+      const end = cleaned.lastIndexOf("}");
+      if (start === -1 || end === -1) throw new Error("Format error — please try again.");
+
+      setDigest(JSON.parse(cleaned.slice(start, end + 1)));
+    } catch (err) {
+      setError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      clearInterval(interval);
+      setLoading(false);
+      setLoadingMsg("");
+    }
+  };
+
+  const totalFound = digest?.sections?.reduce((a, s) => a + (s.stories?.length || 0), 0) || 0;
+
+  return (
+    <div style={{ maxWidth: 720, margin: "0 auto" }}>
+
+      {/* Header */}
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{
+            background: "#E8FF00", color: "#111",
+            fontSize: 10, fontWeight: 600, letterSpacing: "0.08em",
+            textTransform: "uppercase", padding: "3px 7px", borderRadius: 3
+          }}>DICE</span>
+          <span className="muted" style={{ fontSize: 12 }}>Starpower · Weekly Intelligence</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 4 }}>Influencer Marketing Digest</h1>
+            <p className="secondary" style={{ fontSize: 13, lineHeight: 1.5 }}>
+              Automated weekly scan across 13 authoritative trade sources, filtered for influencer marketing relevance.
+            </p>
+          </div>
+          {keySet && (
+            <button onClick={generate} disabled={loading} style={{
+              flexShrink: 0,
+              background: loading ? "#f0f0f0" : "#E8FF00",
+              color: loading ? "#999" : "#111",
+              border: "none", borderRadius: 8,
+              padding: "9px 18px", fontSize: 13, fontWeight: 600,
+              cursor: loading ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap"
+            }}>
+              {loading ? "Generating..." : digest ? "Refresh ↗" : "Generate Digest ↗"}
+            </button>
+          )}
+        </div>
+
+        {/* Source chips */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 14 }}>
+          {SOURCES.map(s => (
+            <span key={s} className="source-chip" style={{
+              fontSize: 11, padding: "2px 8px",
+              border: "1px solid #e5e5e5", borderRadius: 10,
+              color: "#888", background: "#fafafa"
+            }}>{s}</span>
+          ))}
+        </div>
+      </div>
+
+      <hr className="section-divider" style={{ border: "none", borderTop: "1px solid #e5e5e5", marginBottom: 28 }} />
+
+      {/* API key setup */}
+      {!keySet && (
+        <div className="key-form" style={{
+          background: "#fafafa", border: "1px solid #e5e5e5",
+          borderRadius: 12, padding: "1.5rem", marginBottom: 28
+        }}>
+          <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Enter your Anthropic API key</p>
+          <p className="secondary" style={{ fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
+            Your key is stored in session storage only — it never leaves your browser and is cleared when you close the tab.
+            Get a key at <a href="https://console.anthropic.com" target="_blank" rel="noreferrer">console.anthropic.com</a>.
+          </p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="password"
+              value={keyInput}
+              onChange={e => setKeyInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && saveKey()}
+              placeholder="sk-ant-..."
+              style={{
+                flex: 1, padding: "8px 12px", fontSize: 13,
+                border: "1px solid #e5e5e5", borderRadius: 8,
+                background: "#fff", color: "#111"
+              }}
+            />
+            <button onClick={saveKey} disabled={!keyInput.trim()} style={{
+              background: "#E8FF00", color: "#111", border: "none",
+              borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 600,
+              cursor: keyInput.trim() ? "pointer" : "not-allowed"
+            }}>
+              Save
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Key set confirmation */}
+      {keySet && !digest && !loading && !error && (
+        <div style={{ textAlign: "center", padding: "3.5rem 0" }}>
+          <svg width="40" height="40" viewBox="0 0 40 40" fill="none" style={{ margin: "0 auto 14px", display: "block" }}>
+            <circle cx="20" cy="20" r="18" stroke="#e5e5e5" strokeWidth="1.5" />
+            <path d="M20 10 L20 20 L28 20" stroke="#ccc" strokeWidth="1.5" strokeLinecap="round" />
+            <circle cx="20" cy="20" r="2" fill="#ccc" />
+          </svg>
+          <p style={{ fontSize: 14, color: "#555", marginBottom: 6 }}>Ready to scan 13 authoritative sources</p>
+          <p style={{ fontSize: 12, color: "#999" }}>
+            Click "Generate Digest" to fetch this week's influencer marketing intelligence
+          </p>
+          <button onClick={clearKey} style={{
+            marginTop: 20, background: "none", border: "none",
+            fontSize: 12, color: "#bbb", cursor: "pointer", textDecoration: "underline"
+          }}>
+            Clear API key
+          </button>
+        </div>
+      )}
+
+      {/* Loading */}
+      {loading && (
+        <div style={{ textAlign: "center", padding: "3.5rem 0" }}>
+          <div style={{ margin: "0 auto 16px", width: 36 }}><Spinner /></div>
+          <p style={{ fontSize: 13, color: "#888" }}>{loadingMsg}</p>
+        </div>
+      )}
+
+      {/* Error */}
+      {error && !loading && (
+        <div style={{
+          background: "#fef2f2", border: "1px solid #fecaca",
+          borderRadius: 8, padding: "1rem 1.25rem",
+          fontSize: 13, color: "#b91c1c", marginBottom: 20
+        }}>
+          <strong style={{ display: "block", marginBottom: 4 }}>Generation failed</strong>
+          {error}
+        </div>
+      )}
+
+      {/* Digest output */}
+      {digest && !loading && (
+        <div>
+          {/* Meta bar */}
+          <div className="meta-bar" style={{
+            display: "flex", justifyContent: "space-between",
+            alignItems: "center", background: "#f9f9f9",
+            borderRadius: 8, padding: "10px 16px", marginBottom: 20
+          }}>
+            <span style={{ fontSize: 12, color: "#555" }}>
+              Week of <strong style={{ color: "#111" }}>{digest.weekOf}</strong>
+            </span>
+            <span style={{ fontSize: 12, color: "#999" }}>
+              {totalFound} stories · {digest.sections?.filter(s => s.stories?.length > 0).length} categories
+            </span>
+          </div>
+
+          {/* Editor note */}
+          {digest.editorNote && (
+            <div style={{ borderLeft: "3px solid #E8FF00", paddingLeft: 14, marginBottom: 32 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#999", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                Editor's note
+              </span>
+              <p style={{ fontSize: 13, color: "#555", marginTop: 3, lineHeight: 1.65 }}>{digest.editorNote}</p>
+            </div>
+          )}
+
+          {/* Sections */}
+          {digest.sections?.filter(s => s.stories?.length > 0).map((section, si) => (
+            <div key={si} style={{ marginBottom: 40 }}>
+              <div style={{
+                display: "flex", alignItems: "center", gap: 8,
+                marginBottom: 14, paddingBottom: 10,
+                borderBottom: "1px solid #e5e5e5"
+              }} className="section-divider">
+                <span style={{
+                  width: 7, height: 7, borderRadius: "50%",
+                  background: SECTION_ACCENTS[si] || "#ccc",
+                  flexShrink: 0, display: "inline-block"
+                }} />
+                <span style={{
+                  fontSize: 11, fontWeight: 600, color: "#111",
+                  textTransform: "uppercase", letterSpacing: "0.07em"
+                }}>
+                  {section.title}
+                </span>
+                <span style={{ fontSize: 11, color: "#bbb", marginLeft: "auto" }}>
+                  {section.stories.length} {section.stories.length === 1 ? "story" : "stories"}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {section.stories.map((story, j) => (
+                  <div key={j} className="card" style={{
+                    background: "#fff", border: "1px solid #e5e5e5",
+                    borderRadius: 12, padding: "1rem 1.25rem"
+                  }}>
+                    <div style={{
+                      display: "flex", justifyContent: "space-between",
+                      alignItems: "flex-start", gap: 12, marginBottom: 8
+                    }}>
+                      <h3 style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.45, color: "#111" }}>
+                        {story.headline}
+                      </h3>
+                      {story.url && (
+                        <a href={story.url} target="_blank" rel="noreferrer" style={{
+                          fontSize: 11, color: "#2563eb", whiteSpace: "nowrap",
+                          flexShrink: 0, padding: "2px 7px",
+                          border: "1px solid #bfdbfe", borderRadius: 4,
+                          lineHeight: 1.8
+                        }}>
+                          {story.source} ↗
+                        </a>
+                      )}
+                    </div>
+                    <p style={{ fontSize: 13, color: "#555", margin: "0 0 10px", lineHeight: 1.65 }}>
+                      {story.summary}
+                    </p>
+                    {story.whyItMatters && (
+                      <div className="story-divider" style={{ borderTop: "1px solid #f0f0f0", paddingTop: 9 }}>
+                        <span style={{
+                          fontSize: 11, fontWeight: 600, color: "#bbb",
+                          textTransform: "uppercase", letterSpacing: "0.05em"
+                        }}>Why it matters · </span>
+                        <span style={{ fontSize: 13, color: "#666", lineHeight: 1.6 }}>{story.whyItMatters}</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {/* Footer */}
+          <div style={{ borderTop: "1px solid #e5e5e5", paddingTop: 16, marginTop: 8 }}>
+            <p className="footer-text" style={{ fontSize: 11, color: "#bbb", lineHeight: 1.6 }}>
+              Generated by Starpower DICE · Sources: {SOURCES.join(", ")} · Results filtered for influencer marketing relevance only.
+            </p>
+            <button onClick={clearKey} style={{
+              marginTop: 8, background: "none", border: "none",
+              fontSize: 11, color: "#ccc", cursor: "pointer", textDecoration: "underline"
+            }}>
+              Clear API key
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
